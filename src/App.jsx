@@ -299,6 +299,17 @@ function App() {
     return () => window.removeEventListener('comfystudio-open-generate-with-frame', handler)
   }, [])
 
+  // FLF2V "Fill Gap" result returned: switch tab back to Editor so the
+  // user lands on the timeline and sees the freshly-spliced clip.
+  useEffect(() => {
+    const handler = (event) => {
+      const tab = String(event?.detail?.tab || 'editor').trim() || 'editor'
+      setMainTab(tab)
+    }
+    window.addEventListener('comfystudio-switch-tab', handler)
+    return () => window.removeEventListener('comfystudio-switch-tab', handler)
+  }, [])
+
   useEffect(() => {
     const handler = () => setMainTab('generate')
     window.addEventListener('comfystudio-open-generate-tab', handler)

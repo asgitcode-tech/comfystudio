@@ -42,6 +42,11 @@ import {
 import MasterAudioMeter from './AudioMeter'
 import GenerateMusicPopover from './GenerateMusicPopover'
 import { analyzeAudioSource } from '../services/audioAnalysis'
+import { useFrameForAIStore } from '../stores/frameForAIStore'
+import {
+  captureGapBoundaryFrames,
+  getGapNeighborClips,
+} from '../utils/flf2vCaptureUtils'
 
 const TRANSITION_DEFAULT_DURATION_KEY = 'comfystudio-transition-default-duration-frames'
 const DEFAULT_WAVEFORM_SAMPLES = 8192
@@ -670,6 +675,20 @@ function Timeline({ onActiveToolChange }) {
     clipContextMenuAnchor,
     clipContextMenuRef,
   )
+
+  // Gap context menu state — right-click an empty lane region and pick
+  // "Fill Gap (FLF2V)" to bridge two neighbor clips with a Wan 2.2
+  // First-Last-Frame-to-Video generation.
+  const [gapContextMenu, setGapContextMenu] = useState(null) // { x, y, gap }
+  const gapContextMenuRef = useRef(null)
+  const gapContextMenuAnchor = useMemo(
+    () => (gapContextMenu ? { x: gapContextMenu.x, y: gapContextMenu.y } : null),
+    [gapContextMenu?.x, gapContextMenu?.y]
+  )
+  const gapContextMenuPosition = useViewportClampedPosition(
+    gapContextMenuAnchor,
+    gapContextMenuRef,
+  )
   
   // Track rename state
   const [renamingTrackId, setRenamingTrackId] = useState(null)
@@ -996,7 +1015,53 @@ function Timeline({ onActiveToolChange }) {
     e.preventDefault()
     e.stopPropagation()
     selectGap(gap)
+
+    // If both neighbour clips are fillable (video / image), open the
+    // gap context menu so the user can pick "Fill Gap (FLF2V)".
+    const neighbors = getGapNeighborClips(gap)
+    const canFill =
+      (neighbors.before?.clip?.type === 'video' || neighbors.before?.clip?.type === 'image') &&
+      (neighbors.after?.clip?.type === 'video' || neighbors.after?.clip?.type === 'image')
+    if (canFill) {
+      setGapContextMenu({ x: e.clientX, y: e.clientY, gap })
+    } else {
+      setGapContextMenu(null)
+    }
   }, [getTimeFromMouseEvent, getTrackGapAtTime, selectGap])
+
+  const fillGapFlf2vBusyRef = useRef(false)
+  const handleFillGapFlf2v = useCallback(async (gap) => {
+    if (!gap) return
+    if (fillGapFlf2vBusyRef.current) return
+    fillGapFlf2vBusyRef.current = true
+    setGapContextMenu(null)
+    try {
+      const { start, end } = await captureGapBoundaryFrames(gap)
+      if (!start?.file || !end?.file) {
+        console.warn('[FillGap FLF2V] capture failed', { hasStart: !!start, hasEnd: !!end })
+        // Friendly toast would land here in the future; for now surface in console.
+        return
+      }
+      const payload = {
+        mode: 'flf2v',
+        workflowId: 'wan22-flf2v',
+        startFrame: { blobUrl: start.blobUrl, file: start.file, width: start.width, height: start.height },
+        endFrame: { blobUrl: end.blobUrl, file: end.file, width: end.width, height: end.height },
+        targetDurationSeconds: gap.endTime - gap.startTime,
+        targetTrackId: gap.trackId,
+        targetGapStartTime: gap.startTime,
+      }
+      useFrameForAIStore.getState().setFrame(payload)
+      // Existing IPC: GenerateWorkspace listens for this event and
+      // switches the right panel to Generate, picking the workflow
+      // identified by frameForAI.workflowId.
+      window.dispatchEvent(new CustomEvent('comfystudio-open-generate-with-frame'))
+    } catch (err) {
+      console.warn('[FillGap FLF2V] handler error', err?.message || err)
+    } finally {
+      fillGapFlf2vBusyRef.current = false
+    }
+  }, [])
   const clipContextSelectionIds = useMemo(() => (
     clipContextMenu ? selectedClipIds : []
   ), [clipContextMenu, selectedClipIds])
@@ -3419,6 +3484,26 @@ function Timeline({ onActiveToolChange }) {
       window.removeEventListener('keydown', handleEscape)
     }
   }, [clipContextMenu])
+
+  // Close the gap context menu on outside click / Escape.
+  useEffect(() => {
+    if (!gapContextMenu) return
+    const handleClick = (e) => {
+      if (gapContextMenuRef.current && gapContextMenuRef.current.contains(e.target)) {
+        return
+      }
+      setGapContextMenu(null)
+    }
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') setGapContextMenu(null)
+    }
+    window.addEventListener('click', handleClick, true)
+    window.addEventListener('keydown', handleEscape)
+    return () => {
+      window.removeEventListener('click', handleClick, true)
+      window.removeEventListener('keydown', handleEscape)
+    }
+  }, [gapContextMenu])
 
   // Context menu actions
   const renderableSelectedClips = useMemo(() => (
@@ -7323,6 +7408,36 @@ function Timeline({ onActiveToolChange }) {
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* Gap Context Menu (Portal). Right-click on a gap between two
+          video/image clips on the same track. Currently exposes the
+          "Fill Gap (FLF2V)" action — captures last/first frames of the
+          neighbour clips and dispatches an flf2v payload to the Generate
+          workspace. */}
+      {gapContextMenu && (
+        <div
+          ref={gapContextMenuRef}
+          className="fixed z-50 bg-sf-dark-800 border border-sf-dark-600 rounded-lg shadow-xl py-1 min-w-[220px]"
+          style={{
+            left: `${gapContextMenuPosition.x}px`,
+            top: `${gapContextMenuPosition.y}px`,
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-sf-text-muted border-b border-sf-dark-600">
+            Gap
+          </div>
+          <button
+            type="button"
+            onClick={() => handleFillGapFlf2v(gapContextMenu.gap)}
+            className="w-full px-3 py-1.5 text-left text-xs text-sf-text-primary hover:bg-sf-dark-700 flex items-center gap-2 transition-colors"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-sf-accent" />
+            <span>Fill Gap (FLF2V)</span>
+          </button>
         </div>
       )}
 

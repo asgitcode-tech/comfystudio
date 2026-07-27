@@ -16,6 +16,7 @@ import MusicVideoEasyMode from './generate/MusicVideoEasyMode'
 import ShortFilmEasyMode from './generate/ShortFilmEasyMode'
 import WorkflowBrowser from './generate/WorkflowBrowser'
 import WorkflowDetail from './generate/WorkflowDetail'
+import Flf2vDraftCard from './Flf2vDraftCard'
 import TemplateDetail from './generate/TemplateDetail'
 import {
   IMPORTED_WORKFLOWS_CHANGED_EVENT,
@@ -13917,6 +13918,7 @@ function GenerateWorkspace({ onOpenWorkflowSetup = null }) {
           }
           importedAssets = await maybeFinalizePeopleWizardJob(job, importedAssets)
           rememberLatestWorkflowPreview(job, importedAssets)
+
           updateJob(job.id, {
             status: 'done',
             progress: 100,
@@ -14926,8 +14928,20 @@ function GenerateWorkspace({ onOpenWorkflowSetup = null }) {
         {/* Center: Settings - extra left padding in yolo mode when sidebar visible to center content with header tabs */}
         <div className={`flex-1 min-w-0 overflow-auto px-5 py-4 ${generationMode === 'yolo' && !rightSidebarCollapsed ? 'pl-40' : ''}`}>
           <div className={`mx-auto w-full space-y-4 ${generationMode === 'yolo' ? 'max-w-6xl' : 'max-w-5xl'}`}>
+            {/* Fill Gap (FLF2V) action card — self-contained, does NOT
+                depend on the catalog workflow state. Polls ComfyUI directly
+                and splices its own result into the timeline gap on success. */}
+            {frameForAI && generationMode === 'single' && frameForAI.mode === 'flf2v' && (
+              <Flf2vDraftCard
+                frameForAI={frameForAI}
+                timelineFps={timelineFps}
+                currentResolution={resolution}
+                onClear={clearFrameForAI}
+              />
+            )}
+
             {/* Timeline frame from editor (Extend with AI / Starting keyframe for AI) */}
-            {frameForAI && generationMode === 'single' && (
+            {frameForAI && generationMode === 'single' && frameForAI.mode !== 'flf2v' && (
               <div className="p-3 rounded-lg border border-sf-accent/40 bg-sf-accent/5">
                 <div className="flex items-start gap-3">
                   <div className="w-24 h-14 flex-shrink-0 rounded overflow-hidden bg-sf-dark-800 border border-sf-dark-600">

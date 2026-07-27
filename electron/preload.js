@@ -311,6 +311,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   extractVideoPoster: (inputPath, outputPath, options = {}) => ipcRenderer.invoke('media:extractVideoPoster', inputPath, outputPath, options),
 
   /**
+   * Extract a single PNG frame from a video at a given source time via
+   * ffmpeg, returned as raw PNG bytes. Used by the FLF2V "Fill Gap"
+   * action as a fallback when Chromium's <video> decoder refuses the
+   * codec (HEVC/AV1 on Linux).
+   * @param {{ filePath: string, timeSeconds: number, width?: number, height?: number }} payload
+   * @returns {Promise<{success: boolean, data?: Uint8Array, width?: number, height?: number, error?: string}>}
+   */
+  extractVideoFrame: (payload) => ipcRenderer.invoke('media:extractFrame', payload),
+
+  /**
    * Mix the full timeline's program audio into a single mono 16 kHz WAV file
    * via FFmpeg in the main process. Required for timeline-scope transcription
    * (decoding long videos in the renderer via Web Audio causes renderer OOMs).

@@ -4301,6 +4301,77 @@ ipcMain.handle('media:extractVideoPoster', async (event, inputPath, outputPath, 
   })
 })
 
+// Extract a single PNG frame from a video at a given source time via
+// ffmpeg, returning raw PNG bytes (not written to disk). Used by the
+// FLF2V "Fill Gap" action as a fallback when Chromium's <video> element
+// refuses the codec (HEVC / AV1 on Linux). Result.data is a Buffer
+// holding the PNG payload.
+ipcMain.handle('media:extractFrame', async (event, payload = {}) => {
+  if (!ffmpegPath) {
+    return { success: false, error: 'FFmpeg binary not available.' }
+  }
+  const filePath = String(payload?.filePath || '')
+  const timeSeconds = Number(payload?.timeSeconds)
+  if (!filePath) {
+    return { success: false, error: 'Missing filePath.' }
+  }
+  if (!Number.isFinite(timeSeconds) || timeSeconds < 0) {
+    return { success: false, error: 'Invalid timeSeconds.' }
+  }
+  const width = Math.max(16, Math.min(7680, Number(payload?.width) || 1920))
+  const height = Math.max(16, Math.min(4320, Number(payload?.height) || 1080))
+
+  try {
+    await fs.stat(filePath)
+  } catch (err) {
+    return { success: false, error: `Video file not found: ${err.message}` }
+  }
+
+  return await new Promise((resolve) => {
+    const args = [
+      '-y',
+      '-ss', String(timeSeconds),
+      '-i', filePath,
+      '-frames:v', '1',
+      '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`,
+      '-f', 'image2pipe',
+      '-vcodec', 'png',
+      '-',
+    ]
+
+    const proc = spawn(ffmpegPath, args, { windowsHide: true })
+    const chunks = []
+    let stderr = ''
+
+    proc.stdout.on('data', (data) => {
+      chunks.push(data)
+    })
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString()
+    })
+    proc.on('error', (err) => {
+      resolve({ success: false, error: err.message })
+    })
+    proc.on('close', (code) => {
+      if (code === 0 && chunks.length > 0) {
+        const buf = Buffer.concat(chunks)
+        // CDP can't transfer Buffer directly over structured clone on
+        // all platforms; send a Uint8Array view — renderer can pass
+        // it straight to new Blob([...], {type:'image/png'}).
+        const data = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+        resolve({
+          success: true,
+          data,
+          width,
+          height,
+        })
+      } else {
+        resolve({ success: false, error: stderr || `FFmpeg exited with code ${code}` })
+      }
+    })
+  })
+})
+
 // Mix the full timeline's program audio (video-embedded audio + audio clips) into
 // a single mono 16 kHz WAV file using FFmpeg in the main process. This exists as
 // a dedicated handler (not part of export:mixAudio) because:
