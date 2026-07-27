@@ -57,8 +57,17 @@ export default function Flf2vDraftCard({
     : 24
   // Prefer the source clips' native dimensions over project resolution so
   // the generated video matches what's actually on screen in the gap.
-  const sourceWidth = Number(frameForAI?.sourceWidth) || null
-  const sourceHeight = Number(frameForAI?.sourceHeight) || null
+  // Priority: payload-level sourceWidth/Height (set by Timeline's gap-fill
+  // handler) → startFrame.width/Height (per-capture fallback) → project
+  // canvas → 1280×720.
+  const payloadW = Number(frameForAI?.sourceWidth)
+  const payloadH = Number(frameForAI?.sourceHeight)
+  const startW = Number(frameForAI?.startFrame?.width)
+  const startH = Number(frameForAI?.startFrame?.height)
+  const sourceWidth = (Number.isFinite(payloadW) && payloadW > 0) ? payloadW
+    : ((Number.isFinite(startW) && startW > 0) ? startW : null)
+  const sourceHeight = (Number.isFinite(payloadH) && payloadH > 0) ? payloadH
+    : ((Number.isFinite(startH) && startH > 0) ? startH : null)
   const fallbackWidth = Number(currentResolution?.width) || 1280
   const fallbackHeight = Number(currentResolution?.height) || 720
   const gapDuration = Math.max(0, Number(frameForAI?.targetDurationSeconds) || 0)

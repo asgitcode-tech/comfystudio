@@ -1047,6 +1047,13 @@ function Timeline({ onActiveToolChange }) {
         workflowId: 'wan22-flf2v',
         startFrame: { blobUrl: start.blobUrl, file: start.file, width: start.width, height: start.height },
         endFrame: { blobUrl: end.blobUrl, file: end.file, width: end.width, height: end.height },
+        // Source-clip native resolution, surfaced at the payload root so the
+        // Flf2vDraftCard pre-fills width/height from the actual clip instead
+        // of the project canvas. Both neighbours usually share the same
+        // resolution in same-track clips; if they differ we pick the start
+        // frame's dims so the card has a single canonical size.
+        sourceWidth: start.width,
+        sourceHeight: start.height,
         targetDurationSeconds: gap.endTime - gap.startTime,
         targetTrackId: gap.trackId,
         targetGapStartTime: gap.startTime,
